@@ -1,0 +1,75 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "frontendImage": {
+      "value": "${SERVICE_FRONTEND_IMAGE_NAME}"
+    },
+    "frontendResourceExists": {
+      "value": "${SERVICE_FRONTEND_RESOURCE_EXISTS}"
+    },
+    "workerImage": {
+      "value": "${SERVICE_WORKER_IMAGE_NAME}"
+    },
+    "workerResourceExists": {
+      "value": "${SERVICE_WORKER_RESOURCE_EXISTS}"
+    },
+    "mcpImage": {
+      "value": "${SERVICE_MCP_IMAGE_NAME}"
+    },
+    "mcpResourceExists": {
+      "value": "${SERVICE_MCP_RESOURCE_EXISTS}"
+    },
+    "pgAdminPassword": {
+      "value": "${PG_ADMIN_PASSWORD}"
+    },
+    "oidcIssuerUrl": {
+      "value": "${OIDC_ISSUER_URL}"
+    },
+    "oidcClientId": {
+      "value": "${OIDC_CLIENT_ID}"
+    },
+    "oidcClientSecret": {
+      "value": "${OIDC_CLIENT_SECRET}"
+    },
+    "usePrivateLinks": {
+      "value": "${USE_PRIVATE_LINKS}"
+    },
+    "useWorkloadProfiles": {
+      "value": "${USE_WORKLOAD_PROFILES}"
+    },
+    "publicContainerApp": {
+      "value": "${PUBLIC_CONTAINER_APP}"
+    },
+    "deployDevelopmentQueue": {
+      "value": "${DEPLOY_DEVELOPMENT_QUEUE}"
+    },
+    "buildId": {
+      "value": "${BUILD_ID}"
+    },
+    "newSalt": {
+      "value": "${SALT}"
+    },
+    "localPrincipalId": {
+      "value": "${LOCAL_PRINCIPAL_ID}"
+    },
+    "contentUnderstandingApiKey": {
+      "value": "${CONTENT_UNDERSTANDING_API_KEY}"
+    },
+    "azureAiEndpoint": {
+      "value": "${AZURE_AI_ENDPOINT}"
+    },
+    "azureAiApiVersion": {
+      "value": "${AZURE_AI_API_VERSION}"
+    },
+    "clientId": {
+      "value": "${CLIENT_ID}"
+    }
+  }
+}

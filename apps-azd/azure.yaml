@@ -1,0 +1,50 @@
+name: shared-layer-container-apps
+metadata:
+  template: shared-layer-container-apps@0.1.0
+infra:
+  provider: bicep
+  path: ./infra
+  parameters:
+    environmentName: ${AZURE_ENV_NAME}
+    location: ${AZURE_LOCATION}
+    containerAppsEnvironmentId: ${CONTAINERAPPS_ENV_ID}
+    containerAppsDefaultDomain: ${CONTAINERAPPS_DEFAULT_DOMAIN}
+    applicationInsightsConnectionString: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    storageAccountName: ${STORAGE_ACCOUNT_NAME}
+    blobContainerName: ${STORAGE_CONTAINER_NAME}
+    queueName: ${QUEUE_NAME}
+    devQueueName: ${DEV_QUEUE_NAME}
+    blobEndpoint: ${STORAGE_BLOB_ENDPOINT}
+    acrLoginServer: ${ACR_LOGIN_SERVER}
+    applicationIdentityPrincipalId: ${APPLICATION_IDENTITY_PRINCIPAL_ID}
+    applicationIdentityClientId: ${APPLICATION_IDENTITY_CLIENT_ID}
+    applicationIdentityId: ${APPLICATION_IDENTITY_ID}
+    azureOpenAIEndpoint: ${AZURE_OPENAI_ENDPOINT}
+    azureAiSearchEndpoint: ${AZURE_AI_SEARCH_ENDPOINT}
+    tokenStoreSas: ${TOKEN_STORE_SAS_URL}
+    databaseHost: ${DATABASE_HOST}
+    frontendImage: ${services.frontend.image}
+    workerImage: ${services.worker.image}
+    mcpImage: ${services.mcp.image}
+services:
+  frontend:
+    project: ./services/frontend
+    language: python
+    host: containerapp
+    docker:
+      path: ./services/frontend
+      remoteBuild: true
+  worker:
+    project: ./services/worker
+    language: python
+    host: containerapp
+    docker:
+      path: ./services/worker
+      remoteBuild: true
+  mcp:
+    project: ./services/mcp
+    language: python
+    host: containerapp
+    docker:
+      path: ./services/mcp
+      remoteBuild: true
