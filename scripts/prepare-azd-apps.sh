@@ -10,8 +10,149 @@ if [[ ! -f "$AZD_PROJECT_DIR/azure.yaml" ]]; then
   exit 1
 fi
 
+log_progress() {
+  printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" >&2
+}
+
 azd_cmd() {
-  (cd "$AZD_PROJECT_DIR" && azd "$@")
+  # Prevent MSYS from rewriting arguments like "/subscriptions/..." into "C:/Program Files/..." when running Windows binaries.
+  if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
+    (cd "$AZD_PROJECT_DIR" && MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' azd "$@")
+  else
+    (cd "$AZD_PROJECT_DIR" && azd "$@")
+  fi
+}
+
+ensure_env_file() {
+  if [[ ! -d "$AZD_ENV_DIR" ]]; then
+    mkdir -p "$AZD_ENV_DIR"
+  fi
+  if [[ ! -f "$AZD_ENV_FILE" ]]; then
+    touch "$AZD_ENV_FILE"
+  fi
+}
+
+azd_env_set() {
+  local key="$1"
+  local value="${2:-}"
+  ensure_env_file
+  "$PYTHON_BIN" - <<'PYCODE' "$AZD_ENV_FILE" "$key" "$value"
+import re
+import sys
+
+env_path, key, value = sys.argv[1:4]
+
+try:
+    with open(env_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+except FileNotFoundError:
+    lines = []
+
+escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+new_line = f"{key}=\"{escaped}\"\n"
+pattern = re.compile(rf"^{re.escape(key)}=")
+
+updated = False
+result = []
+for line in lines:
+    if pattern.match(line):
+        if not updated:
+            result.append(new_line)
+            updated = True
+    else:
+        result.append(line)
+
+if not updated:
+    result.append(new_line)
+
+with open(env_path, 'w', encoding='utf-8') as f:
+    for line in result:
+        if line.endswith('\n'):
+            f.write(line)
+        else:
+            f.write(line + '\n')
+PYCODE
+}
+
+ensure_config_file() {
+  if [[ ! -d "$AZD_CONFIG_DIR" ]]; then
+    mkdir -p "$AZD_CONFIG_DIR"
+  fi
+  if [[ ! -f "$AZD_CONFIG_FILE" ]]; then
+    printf '{\n  "name": "%s"\n}\n' "$AZD_ENV_NAME" >"$AZD_CONFIG_FILE"
+  fi
+}
+
+azd_infra_param_set() {
+  local key="$1"
+  local value="${2:-}"
+  ensure_config_file
+  if [[ -z "$value" ]]; then
+    azd_infra_param_clear "$key"
+    return
+  fi
+  "$PYTHON_BIN" - <<'PYCODE' "$AZD_CONFIG_FILE" "$key" "$value"
+import json
+import sys
+
+config_path, key, value = sys.argv[1:4]
+segments = [part for part in f"infra.parameters.{key}.value".split('.') if part]
+
+try:
+    with open(config_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+
+node = data
+for segment in segments[:-1]:
+    node = node.setdefault(segment, {})
+
+node[segments[-1]] = value
+
+with open(config_path, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+PYCODE
+}
+
+azd_infra_param_clear() {
+  local key="$1"
+  ensure_config_file
+  "$PYTHON_BIN" - <<'PYCODE' "$AZD_CONFIG_FILE" "$key"
+import json
+import sys
+
+config_path, key = sys.argv[1:3]
+segments = [part for part in f"infra.parameters.{key}.value".split('.') if part]
+
+try:
+    with open(config_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+
+stack = []
+node = data
+for segment in segments:
+    if not isinstance(node, dict) or segment not in node:
+        break
+    stack.append((node, segment))
+    node = node[segment]
+else:
+    parent, last = stack[-1]
+    parent.pop(last, None)
+    for parent, segment in reversed(stack[:-1]):
+        child = parent.get(segment)
+        if isinstance(child, dict) and not child:
+            parent.pop(segment, None)
+        else:
+            break
+
+with open(config_path, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+PYCODE
 }
 
 PYTHON_BIN=${PYTHON_BIN:-python}
@@ -280,14 +421,22 @@ ensure_group_deployment() {
   fi
 }
 
-ensure_group_deployment "identity-$ENV" "identity"
 ensure_group_deployment "paas-$ENV" "PaaS"
 ensure_group_deployment "env-$ENV" "environment"
 
 # Identity outputs
-fetch_group_output UAI_PRINCIPAL_ID "identity-$ENV" "principalId"
-fetch_group_output UAI_CLIENT_ID "identity-$ENV" "clientId"
-fetch_group_output UAI_ID "identity-$ENV" "id"
+log_progress "Retrieving identity outputs from environment deployment"
+fetch_group_output UAI_PRINCIPAL_ID "env-$ENV" "applicationIdentityPrincipalId" true
+fetch_group_output UAI_CLIENT_ID "env-$ENV" "applicationIdentityClientId" true
+fetch_group_output UAI_ID "env-$ENV" "applicationIdentityId" true
+
+if [[ -z "$UAI_PRINCIPAL_ID" || -z "$UAI_CLIENT_ID" || -z "$UAI_ID" ]]; then
+  log_progress "Falling back to identity deployment outputs"
+  ensure_group_deployment "identity-$ENV" "identity"
+  fetch_group_output UAI_PRINCIPAL_ID "identity-$ENV" "principalId"
+  fetch_group_output UAI_CLIENT_ID "identity-$ENV" "clientId"
+  fetch_group_output UAI_ID "identity-$ENV" "id"
+fi
 
 # PaaS outputs (allow empty for fallback resolution)
 fetch_group_output OPENAI_ENDPOINT "paas-$ENV" "azureOpenAiEndpoint" true
@@ -472,53 +621,76 @@ fi
 
 # Create/select azd environment
 AZD_ENV_NAME="$ENV"
+AZD_CONFIG_DIR="$AZD_PROJECT_DIR/.azure/$AZD_ENV_NAME"
+AZD_CONFIG_FILE="$AZD_CONFIG_DIR/config.json"
+AZD_ENV_DIR="$AZD_CONFIG_DIR"
+AZD_ENV_FILE="$AZD_ENV_DIR/.env"
 if ! azd_cmd env get-values --environment "$AZD_ENV_NAME" >/dev/null 2>&1; then
   azd_cmd env new "$AZD_ENV_NAME" --subscription "$SUBSCRIPTION_ID" --location "$REGION" >/dev/null
 fi
 
 echo "Setting azd environment variables in '$AZD_ENV_NAME'..."
-azd_cmd env set AZURE_ENV_NAME "$ENV"
-azd_cmd env set AZURE_LOCATION "$REGION"
-azd_cmd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION_ID"
-azd_cmd env set AZURE_RESOURCE_GROUP "$RESOURCE_GROUP"
+azd_env_set AZURE_ENV_NAME "$ENV"
+azd_env_set AZURE_LOCATION "$REGION"
+azd_env_set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION_ID"
+azd_env_set AZURE_RESOURCE_GROUP "$RESOURCE_GROUP"
 
 # Identity and endpoints
-azd_cmd env set APPLICATION_IDENTITY_PRINCIPAL_ID "$UAI_PRINCIPAL_ID"
-azd_cmd env set APPLICATION_IDENTITY_CLIENT_ID "$UAI_CLIENT_ID"
-azd_cmd env set APPLICATION_IDENTITY_ID "$UAI_ID"
-azd_cmd env set AZURE_OPENAI_ENDPOINT "$OPENAI_ENDPOINT"
-azd_cmd env set AZURE_AI_SEARCH_ENDPOINT "$SEARCH_ENDPOINT"
+azd_env_set APPLICATION_IDENTITY_PRINCIPAL_ID "$UAI_PRINCIPAL_ID"
+azd_env_set APPLICATION_IDENTITY_CLIENT_ID "$UAI_CLIENT_ID"
+azd_env_set APPLICATION_IDENTITY_ID "$UAI_ID"
+azd_env_set AZURE_OPENAI_ENDPOINT "$OPENAI_ENDPOINT"
+azd_env_set AZURE_AI_SEARCH_ENDPOINT "$SEARCH_ENDPOINT"
+azd_infra_param_set applicationIdentityPrincipalId "$UAI_PRINCIPAL_ID"
+azd_infra_param_set applicationIdentityClientId "$UAI_CLIENT_ID"
+azd_infra_param_set applicationIdentityId "$UAI_ID"
+azd_infra_param_set azureOpenAIEndpoint "$OPENAI_ENDPOINT"
+azd_infra_param_set azureAiSearchEndpoint "$SEARCH_ENDPOINT"
 
 # Env/infra
-azd_cmd env set CONTAINERAPPS_ENV_ID "$ENV_ID"
-azd_cmd env set CONTAINERAPPS_DEFAULT_DOMAIN "$ENV_DOMAIN"
-azd_cmd env set APPLICATIONINSIGHTS_CONNECTION_STRING "$APPINSIGHTS_CS"
-azd_cmd env set STORAGE_ACCOUNT_NAME "$STORAGE_NAME"
-azd_cmd env set STORAGE_BLOB_ENDPOINT "$BLOB_ENDPOINT"
-azd_cmd env set STORAGE_CONTAINER_NAME "$CONTAINER_NAME"
-azd_cmd env set QUEUE_NAME "$QUEUE_NAME"
+azd_env_set CONTAINERAPPS_ENV_ID "$ENV_ID"
+azd_env_set CONTAINERAPPS_DEFAULT_DOMAIN "$ENV_DOMAIN"
+azd_env_set APPLICATIONINSIGHTS_CONNECTION_STRING "$APPINSIGHTS_CS"
+azd_env_set STORAGE_ACCOUNT_NAME "$STORAGE_NAME"
+azd_env_set STORAGE_BLOB_ENDPOINT "$BLOB_ENDPOINT"
+azd_env_set STORAGE_CONTAINER_NAME "$CONTAINER_NAME"
+azd_env_set QUEUE_NAME "$QUEUE_NAME"
+azd_infra_param_set containerAppsEnvironmentId "$ENV_ID"
+azd_infra_param_set containerAppsDefaultDomain "$ENV_DOMAIN"
+azd_infra_param_set applicationInsightsConnectionString "$APPINSIGHTS_CS"
+azd_infra_param_set storageAccountName "$STORAGE_NAME"
+azd_infra_param_set blobEndpoint "$BLOB_ENDPOINT"
+azd_infra_param_set blobContainerName "$CONTAINER_NAME"
+azd_infra_param_set queueName "$QUEUE_NAME"
 if [[ "${DEPLOY_DEV_QUEUE,,}" == "true" ]]; then
-  azd_cmd env set DEV_QUEUE_NAME "$DEV_QUEUE_NAME"
+  azd_env_set DEV_QUEUE_NAME "$DEV_QUEUE_NAME"
+  azd_infra_param_set devQueueName "$DEV_QUEUE_NAME"
 else
-  azd_cmd env set DEV_QUEUE_NAME ""
+  azd_env_set DEV_QUEUE_NAME ""
+  azd_infra_param_set devQueueName ""
 fi
-azd_cmd env set TOKEN_STORE_SAS_URL "$TOKEN_SAS"
-azd_cmd env set ACR_LOGIN_SERVER "$ACR_LOGIN"
-azd_cmd env set ACR_NAME "$ACR_NAME"
-azd_cmd env set AZURE_CONTAINER_REGISTRY_ENDPOINT "$ACR_LOGIN"
-azd_cmd env set AZURE_CONTAINER_REGISTRY_NAME "$ACR_NAME"
+azd_env_set TOKEN_STORE_SAS_URL "$TOKEN_SAS"
+azd_env_set ACR_LOGIN_SERVER "$ACR_LOGIN"
+azd_env_set ACR_NAME "$ACR_NAME"
+azd_env_set AZURE_CONTAINER_REGISTRY_ENDPOINT "$ACR_LOGIN"
+azd_env_set AZURE_CONTAINER_REGISTRY_NAME "$ACR_NAME"
+azd_infra_param_set tokenStoreSas "$TOKEN_SAS"
+azd_infra_param_set acrLoginServer "$ACR_LOGIN"
+azd_infra_param_set environmentName "$ENV"
+azd_infra_param_set location "$REGION"
 if [[ -n "$ACR_ID" ]]; then
-  azd_cmd env set AZURE_CONTAINER_REGISTRY_ID "$ACR_ID"
+  azd_env_set AZURE_CONTAINER_REGISTRY_ID "$ACR_ID"
 fi
 
 # Database
-azd_cmd env set DATABASE_HOST "$PG_HOST"
-azd_cmd env set DATABASE_NAME postgres
-azd_cmd env set DATABASE_SCHEMA public
+azd_env_set DATABASE_HOST "$PG_HOST"
+azd_env_set DATABASE_NAME postgres
+azd_env_set DATABASE_SCHEMA public
+azd_infra_param_set databaseHost "$PG_HOST"
 
 # Optional: app instance suffix for multiple ACA envs per shared PaaS
 if [[ -n "$APP_INSTANCE" ]]; then
-  azd_cmd env set APP_INSTANCE "$APP_INSTANCE"
+  azd_env_set APP_INSTANCE "$APP_INSTANCE"
 fi
 
 echo "Done. You can inspect values with: (cd $AZD_PROJECT_DIR && azd env get-values --environment $AZD_ENV_NAME)"

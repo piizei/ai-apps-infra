@@ -107,8 +107,6 @@ param skipContainerApps bool = false
 @description('Fallback image to use when skipContainerApps is true or images are not supplied.')
 param defaultImage string = 'mcr.microsoft.com/dotnet/samples:aspnetapp'
 
-var resolvedAcrName = split(acrLoginServer, '.')[0]
-
 module apps '../../infrastructure/layers/main.apps.bicep' = {
   name: 'container-apps'
   params: {
@@ -123,7 +121,6 @@ module apps '../../infrastructure/layers/main.apps.bicep' = {
     devQueueName: devQueueName
     blobEndpoint: blobEndpoint
     acrLoginServer: acrLoginServer
-    acrName: resolvedAcrName
     applicationIdentityPrincipalId: applicationIdentityPrincipalId
     applicationIdentityClientId: applicationIdentityClientId
     applicationIdentityId: applicationIdentityId

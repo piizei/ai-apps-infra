@@ -29,7 +29,6 @@ param queueName string
 param devQueueName string = ''
 param blobEndpoint string
 param acrLoginServer string
-param acrName string
 
 // Images and app deploy switches
 param frontendImage string = ''
@@ -188,16 +187,4 @@ resource containerApp 'Microsoft.App/containerApps@2024-08-02-preview' = [
 ]
 
 // Ensure the user-assigned identity has AcrPull on ACR
-var acrPullRole = resourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-resource acr 'Microsoft.ContainerRegistry/registries@2021-09-01' existing = { name: acrName }
-resource uaiAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, applicationIdentityId, acrPullRole)
-  scope: acr
-  properties: {
-    roleDefinitionId: acrPullRole
-    principalId: applicationIdentityPrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 output MCP_ENDPOINT string = 'https://mcp.${containerAppsDefaultDomain}'

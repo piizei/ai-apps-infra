@@ -62,14 +62,17 @@ module base './main.base.bicep' = {
   }
 }
 
-module identity './main.identity.bicep' = {
+module env './main.env.bicep' = {
   scope: rg
-  name: 'identity'
+  name: 'env'
   params: {
     environmentName: environmentName
     projectName: projectName
     tags: tags
     location: location
+    useWorkloadProfiles: useWorkloadProfiles
+    publicContainerApps: publicContainerApps
+    deployDevelopmentQueue: deployDevelopmentQueue
   }
 }
 
@@ -82,24 +85,10 @@ module paas './main.paas.bicep' = {
     tags: tags
     location: location
     // paas resolves vnet/subnet by name internally
-    applicationIdentityPrincipalId: identity.outputs.principalId
-    applicationIdentityClientId: identity.outputs.clientId
-    applicationIdentityId: identity.outputs.id
+    applicationIdentityPrincipalId: env.outputs.applicationIdentityPrincipalId
+    applicationIdentityClientId: env.outputs.applicationIdentityClientId
+    applicationIdentityId: env.outputs.applicationIdentityId
     pgAdminPassword: pgAdminPassword
-  }
-}
-
-module env './main.env.bicep' = {
-  scope: rg
-  name: 'env'
-  params: {
-    environmentName: environmentName
-    projectName: projectName
-    tags: tags
-    location: location
-    useWorkloadProfiles: useWorkloadProfiles
-    publicContainerApps: publicContainerApps
-    deployDevelopmentQueue: deployDevelopmentQueue
   }
 }
 
@@ -120,15 +109,14 @@ module apps './main.apps.bicep' = {
   devQueueName: deployDevelopmentQueue ? env.outputs.devQueueName : ''
   blobEndpoint: env.outputs.storageBlobEndpoint
   acrLoginServer: env.outputs.acrLoginServer
-  acrName: env.outputs.acrName
     frontendImage: frontendImage
     workerImage: workerImage
     mcpImage: mcpImage
     useWorkloadProfiles: useWorkloadProfiles
     publicContainerApps: publicContainerApps
-    applicationIdentityPrincipalId: identity.outputs.principalId
-    applicationIdentityClientId: identity.outputs.clientId
-    applicationIdentityId: identity.outputs.id
+    applicationIdentityPrincipalId: env.outputs.applicationIdentityPrincipalId
+    applicationIdentityClientId: env.outputs.applicationIdentityClientId
+    applicationIdentityId: env.outputs.applicationIdentityId
   azureOpenAIEndpoint: paas.outputs.azureOpenAiEndpoint
   azureAiSearchEndpoint: paas.outputs.azureAiSearchEndpoint
     contentUnderstandingApiKey: contentUnderstandingApiKey

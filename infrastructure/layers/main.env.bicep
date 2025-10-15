@@ -64,6 +64,18 @@ param blobContainerName string = empty(appInstance) ? 'blob${salt}' : 'blob${sal
 // Container Apps environment
 param containerAppEnvName string = empty(appInstance) ? 'env-${salt}' : 'env-${salt}-${appInstance}'
 
+@description('Managed identity name used by container apps within this environment.')
+param applicationIdentityName string = empty(appInstance) ? 'ca-identity-${salt}' : 'ca-identity-${salt}-${appInstance}'
+
+module containerAppIdentity '../identity.bicep' = {
+  name: 'containerAppIdentity'
+  params: {
+    location: location
+    tags: tags
+    applicationIdentityName: applicationIdentityName
+  }
+}
+
 // ACR
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2021-09-01' = {
   name: acrName
@@ -166,6 +178,40 @@ resource queues 'Microsoft.Storage/storageAccounts/queueServices/queues@2022-09-
   parent: storage::queueServices
   name: q
 }]
+
+var acrPullRole = resourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var storageBlobDataOwnerRole = resourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+var storageQueueContributorRole = resourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+
+resource identityAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containerRegistry.id, applicationIdentityName, acrPullRole)
+  scope: containerRegistry
+  properties: {
+    roleDefinitionId: acrPullRole
+    principalId: containerAppIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource identityStorageBlobOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, applicationIdentityName, storageBlobDataOwnerRole)
+  scope: storage
+  properties: {
+    roleDefinitionId: storageBlobDataOwnerRole
+    principalId: containerAppIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource identityStorageQueueContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, applicationIdentityName, storageQueueContributorRole)
+  scope: storage
+  properties: {
+    roleDefinitionId: storageQueueContributorRole
+    principalId: containerAppIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
 
 // Event Grid subscriptions for blob events to queues
 resource blobEventSubscriptions 'Microsoft.EventGrid/eventSubscriptions@2023-06-01-preview' = [for (q, i) in queueNames: {
@@ -304,3 +350,6 @@ output devQueueName string = devQueueName
 output tokenStoreSasUrl string = tokenStoreContainerSasUrl
 output containerAppsEnvironmentId string = containerAppEnv.id
 output containerAppsDefaultDomain string = containerAppEnv.properties.defaultDomain
+output applicationIdentityPrincipalId string = containerAppIdentity.outputs.principalId
+output applicationIdentityClientId string = containerAppIdentity.outputs.clientId
+output applicationIdentityId string = containerAppIdentity.outputs.id
